@@ -6,9 +6,10 @@ import {
   OnGatewayDisconnect,
   MessageBody,
   ConnectedSocket,
+  OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, Inject } from '@nestjs/common';
+import { Logger, Inject, OnModuleDestroy } from '@nestjs/common';
 import { AICallPeer } from '../../infrastructure/webrtc/AICallPeer';
 import { AIConversationService } from '../../application/services/AIConversationService';
 import type { ICallRepository } from '../../domain/repositories/CallRepository.interface';
@@ -32,7 +33,7 @@ import { CALL_REPOSITORY } from '../../domain/repositories/CallRepository.interf
   namespace: '/signaling',
 })
 export class SignalingGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
   @WebSocketServer()
   server: Server;
@@ -49,12 +50,19 @@ export class SignalingGateway
     string,
     { role: 'user' | 'assistant'; content: string }[]
   >(); // 세션별 대화 히스토리
+  private readonly sessionLastActivity = new Map<string, number>(); // 세션별 마지막 활동 시간 (timestamp)
+  private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30분 타임아웃
+  private readonly CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5분마다 정리
+  private cleanupInterval?: NodeJS.Timeout;
 
   constructor(
     private readonly aiConversationService: AIConversationService,
     @Inject(CALL_REPOSITORY)
     private readonly callRepository: ICallRepository,
-  ) {}
+  ) {
+    // 주기적 메모리 정리 시작
+    this.startPeriodicCleanup();
+  }
 
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
@@ -115,6 +123,9 @@ export class SignalingGateway
       peerId,
       callId,
     });
+
+    // 활동 시간 업데이트
+    this.updateSessionActivity(sessionId);
 
     // Notify others in the room
     client.to(sessionId).emit('peer-joined', { peerId });
@@ -296,6 +307,9 @@ export class SignalingGateway
     // Clear processing flag
     this.processingAudio.delete(sessionId);
 
+    // Clear conversation history
+    this.conversationHistory.delete(sessionId);
+
     // Notify others
     client.to(sessionId).emit('peer-left', { peerId });
 
@@ -332,6 +346,9 @@ export class SignalingGateway
 
     // 🔒 처리 시작 - 플래그 설정
     this.processingAudio.set(sessionId, true);
+
+    // 활동 시간 업데이트
+    this.updateSessionActivity(sessionId);
 
     try {
       // Base64 → Buffer
@@ -412,22 +429,37 @@ export class SignalingGateway
 
       this.logger.log(`✅ Valid speech: "${userMessage}"`);
 
-      // 2. AI Response
+      // 2. 대화 히스토리 가져오기 (없으면 빈 배열)
+      const history = this.conversationHistory.get(sessionId) || [];
+
+      // 3. AI Response (대화 히스토리 포함)
       const aiResponse = await this.aiConversationService.generateResponse(
         userMessage,
-        [],
+        history,
         '당신은 친절한 AI 전화 상담원입니다. 간결하고 명확하게 답변하세요.',
       );
 
       this.logger.log(`🤖 AI response: "${aiResponse}"`);
 
-      // 3. TTS (남성 목소리 - echo)
+      // 4. 대화 히스토리 업데이트 (최근 10개만 유지)
+      history.push({ role: 'user', content: userMessage });
+      history.push({ role: 'assistant', content: aiResponse });
+
+      // 최근 10개 턴(20개 메시지)만 유지
+      if (history.length > 20) {
+        history.splice(0, history.length - 20);
+      }
+
+      this.conversationHistory.set(sessionId, history);
+      this.logger.log(`💬 Conversation history updated: ${history.length} messages`);
+
+      // 5. TTS (남성 목소리 - echo)
       const aiAudioBuffer =
         await this.aiConversationService.textToSpeech(aiResponse, 'echo');
 
       this.logger.log(`AI audio: ${aiAudioBuffer.length} bytes`);
 
-      // 4. Send to client
+      // 6. Send to client
       this.server.to(sessionId).emit('ai-audio-response', {
         audioData: aiAudioBuffer.toString('base64'),
         timestamp: Date.now(),
@@ -484,5 +516,83 @@ export class SignalingGateway
    */
   sendToPeer(socketId: string, event: string, data: unknown): void {
     this.server.to(socketId).emit(event, data);
+  }
+
+  /**
+   * 세션 활동 시간 업데이트
+   */
+  private updateSessionActivity(sessionId: string): void {
+    this.sessionLastActivity.set(sessionId, Date.now());
+  }
+
+  /**
+   * 주기적 메모리 정리 시작
+   */
+  private startPeriodicCleanup(): void {
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupInactiveSessions();
+    }, this.CLEANUP_INTERVAL_MS);
+
+    this.logger.log(
+      `🧹 Periodic cleanup started (every ${this.CLEANUP_INTERVAL_MS / 1000 / 60} minutes)`,
+    );
+  }
+
+  /**
+   * 비활성 세션 정리 (30분 이상 활동 없는 세션)
+   */
+  private cleanupInactiveSessions(): void {
+    const now = Date.now();
+    const timeoutThreshold = now - this.SESSION_TIMEOUT_MS;
+    let cleanedCount = 0;
+
+    this.logger.log('🧹 Starting inactive session cleanup...');
+
+    // 모든 세션 검사
+    for (const [sessionId, lastActivity] of this.sessionLastActivity.entries()) {
+      if (lastActivity < timeoutThreshold) {
+        // 타임아웃된 세션 정리
+        this.cleanupSession(sessionId);
+        cleanedCount++;
+      }
+    }
+
+    // 메모리 사용량 로깅
+    const memoryUsage = process.memoryUsage();
+    this.logger.log(
+      `🧹 Cleanup complete: ${cleanedCount} sessions removed. ` +
+        `Memory: ${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)}MB / ${(memoryUsage.heapTotal / 1024 / 1024).toFixed(2)}MB`,
+    );
+  }
+
+  /**
+   * 세션 완전 정리 (모든 맵에서 제거)
+   */
+  private cleanupSession(sessionId: string): void {
+    this.logger.log(`🗑️ Cleaning up session: ${sessionId}`);
+
+    // AI Peer 종료
+    const aiPeer = this.aiPeers.get(sessionId);
+    if (aiPeer) {
+      aiPeer.close();
+      this.aiPeers.delete(sessionId);
+    }
+
+    // 모든 맵에서 제거
+    this.sessions.delete(sessionId);
+    this.greetingSent.delete(sessionId);
+    this.processingAudio.delete(sessionId);
+    this.conversationHistory.delete(sessionId);
+    this.sessionLastActivity.delete(sessionId);
+  }
+
+  /**
+   * Gateway 종료 시 정리
+   */
+  onModuleDestroy(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.logger.log('🧹 Periodic cleanup stopped');
+    }
   }
 }
