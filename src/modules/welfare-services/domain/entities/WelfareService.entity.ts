@@ -82,7 +82,7 @@ export class WelfareService {
   @Column({ name: 'site', type: 'text', nullable: true })
   site: string;
 
-  @Column({ name: 'contact', length: 200, nullable: true })
+  @Column({ name: 'contact', type: 'text', nullable: true })
   contact: string;
 
   @Column({ name: 'department', length: 200, nullable: true })

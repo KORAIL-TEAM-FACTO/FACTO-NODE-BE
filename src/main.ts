@@ -23,11 +23,14 @@ async function bootstrap() {
     logger: new LoggerService(),
   });
 
-  // Serve static files (백오피스)
-  app.useStaticAssets(join(__dirname, '..', 'public'));
+  // Global Prefix (정적 파일은 제외)
+  app.setGlobalPrefix('api/v1', {
+    exclude: ['/', '/admin.html', '/admin/*', '/public/*'],
+  });
 
-  // Global Prefix
-  app.setGlobalPrefix('api/v1');
+  // Serve static files (백오피스)
+  // __dirname = dist/src 이므로 ../.. 로 프로젝트 루트로 이동
+  app.useStaticAssets(join(__dirname, '../..', 'public'));
 
   // Global Pipes
   app.useGlobalPipes(

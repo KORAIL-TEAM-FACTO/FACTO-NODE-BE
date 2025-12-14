@@ -5,6 +5,7 @@ import { UsersModule } from './modules/users/users.module';
 import { HealthModule } from './modules/health/health.module';
 import { CallsModule } from './modules/calls/Calls.module';
 import { WelfareServicesModule } from './modules/welfare-services/WelfareServices.module';
+import { ChatModule } from './modules/chat/Chat.module';
 import { LoggerService } from './infrastructure/logging/logger.service';
 
 /**
@@ -105,6 +106,7 @@ import { LoggerService } from './infrastructure/logging/logger.service';
     HealthModule,
     CallsModule,
     WelfareServicesModule,
+    ChatModule,
   ],
   providers: [LoggerService],
 })
