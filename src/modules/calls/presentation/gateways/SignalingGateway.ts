@@ -242,22 +242,109 @@ export class SignalingGateway
   }
 
   /**
-   * Send audio data to session (for AI processing)
+   * Handle user audio (WebM from browser)
    */
-  @SubscribeMessage('audio-data')
-  handleAudioData(
+  @SubscribeMessage('user-audio')
+  async handleUserAudio(
     @MessageBody()
     data: {
       sessionId: string;
-      peerId: string;
-      audioData: ArrayBuffer;
-      timestamp: number;
+      callId: string;
+      audioData: string; // base64
+      mimeType: string;
     },
     @ConnectedSocket() client: Socket,
-  ): void {
-    const { sessionId } = data;
-    // Forward to AI processing service
-    client.to(sessionId).emit('audio-data', data);
+  ): Promise<void> {
+    const { sessionId, callId, audioData, mimeType } = data;
+
+    this.logger.log(
+      `Received user audio for session ${sessionId} (${audioData.length} chars)`,
+    );
+
+    try {
+      // Base64 → Buffer
+      const audioBuffer = Buffer.from(audioData, 'base64');
+
+      this.logger.log(`Audio buffer: ${audioBuffer.length} bytes`);
+
+      // 🔇 음성 데이터 크기 검증 (너무 작으면 잡음)
+      if (audioBuffer.length < 20000) {
+        // 20KB 미만은 무시 (클라이언트와 동일한 임계값)
+        this.logger.log(
+          `⚠️ Audio too small (${(audioBuffer.length / 1024).toFixed(1)}KB < 20KB) - ignored`,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `🎙️ Processing audio: ${(audioBuffer.length / 1024).toFixed(1)}KB`,
+      );
+
+      // 1. STT
+      const userMessage =
+        await this.aiConversationService.transcribeAudio(audioBuffer);
+
+      // 🔇 음성 인식 결과 검증
+      if (!userMessage || userMessage.trim().length === 0) {
+        this.logger.log('⚠️ No speech detected - empty transcription');
+        return;
+      }
+
+      // 🔇 최소 단어 길이 검증 (3글자 미만은 잡음일 가능성 높음 - 더 엄격하게)
+      if (userMessage.trim().length < 3) {
+        this.logger.log(
+          `⚠️ Speech too short (${userMessage.trim().length} chars): "${userMessage}" - ignored`,
+        );
+        return;
+      }
+
+      // 🔇 반복되는 무의미한 문구 필터링
+      const noisePatterns = [
+        /^(아+|음+|어+|네+|예+|으+|흠+)$/i, // 추임새
+        /시청.*감사/i, // 유튜브 엔딩
+        /구독.*좋아요/i, // 유튜브 광고
+        /배경.*잡음/i, // Whisper 프롬프트 누출
+        /^(uh+|um+|ah+|hmm+)$/i, // 영어 추임새
+        /^(끝|end|종료|stop)$/i, // 무의미한 종료 신호
+      ];
+
+      if (noisePatterns.some((pattern) => pattern.test(userMessage.trim()))) {
+        this.logger.log(
+          `⚠️ Noise pattern detected: "${userMessage}" - ignored`,
+        );
+        return;
+      }
+
+      this.logger.log(`✅ Valid speech: "${userMessage}"`);
+
+      // 2. AI Response
+      const aiResponse = await this.aiConversationService.generateResponse(
+        userMessage,
+        [],
+        '당신은 친절한 AI 전화 상담원입니다. 간결하고 명확하게 답변하세요.',
+      );
+
+      this.logger.log(`🤖 AI response: "${aiResponse}"`);
+
+      // 3. TTS
+      const aiAudioBuffer =
+        await this.aiConversationService.textToSpeech(aiResponse);
+
+      this.logger.log(`AI audio: ${aiAudioBuffer.length} bytes`);
+
+      // 4. Send to client
+      this.server.to(sessionId).emit('ai-audio-response', {
+        audioData: aiAudioBuffer.toString('base64'),
+        timestamp: Date.now(),
+      });
+
+      this.logger.log('✅ AI response sent to client');
+    } catch (error) {
+      this.logger.error(`Failed to process user audio: ${error.message}`);
+      client.emit('error', {
+        message: 'Failed to process audio',
+      });
+    }
   }
 
   /**

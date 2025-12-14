@@ -4,6 +4,7 @@ import type { ICallRepository } from '../../domain/repositories/CallRepository.i
 import { CALL_REPOSITORY } from '../../domain/repositories/CallRepository.interface';
 import { CallNotFoundException } from '../../domain/exceptions/CallNotFoundException';
 import { AIConversationService } from '../services/AIConversationService';
+import { LocalSTTService } from '../services/LocalSTTService';
 
 /**
  * Process AI Conversation Use Case
@@ -19,6 +20,7 @@ interface ProcessAIConversationRequest {
   callId: string;
   audioBuffer: Buffer;
   systemPrompt?: string;
+  mimeType?: string; // 오디오 MIME 타입 (audio/mp3, audio/webm 등)
 }
 
 interface ProcessAIConversationResponse {
@@ -43,6 +45,7 @@ export class ProcessAIConversationUseCase
     @Inject(CALL_REPOSITORY)
     private readonly callRepository: ICallRepository,
     private readonly aiConversationService: AIConversationService,
+    private readonly localSTTService: LocalSTTService,
   ) {}
 
   async execute(
@@ -55,9 +58,11 @@ export class ProcessAIConversationUseCase
       throw new CallNotFoundException(request.callId);
     }
 
-    // 2. Transcribe user audio to text
-    const userMessage =
-      await this.aiConversationService.transcribeAudio(request.audioBuffer);
+    // 2. Transcribe user audio to text (로컬 Whisper 사용)
+    const userMessage = await this.localSTTService.transcribeAudio(
+      request.audioBuffer,
+      'ko',
+    );
 
     // 3. Add to transcript
     call.addToTranscript('user', userMessage);

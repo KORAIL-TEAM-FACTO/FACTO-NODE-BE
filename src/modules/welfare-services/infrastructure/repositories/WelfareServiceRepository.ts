@@ -47,6 +47,23 @@ export class WelfareServiceRepository implements IWelfareServiceRepository {
     return { data, total };
   }
 
+  /**
+   * Search welfare services by keyword
+   * - Searches in service_name and ai_summary fields
+   * - Uses OR condition for broader results
+   * - Orders by inquiry_count (more popular first)
+   */
+  async searchByKeyword(keyword: string, limit: number = 5): Promise<WelfareService[]> {
+    return this.repository
+      .createQueryBuilder('ws')
+      .where('ws.service_name LIKE :keyword', { keyword: `%${keyword}%` })
+      .orWhere('ws.ai_summary LIKE :keyword', { keyword: `%${keyword}%` })
+      .orderBy('ws.inquiry_count', 'DESC') // 조회수가 많은 것 우선
+      .addOrderBy('ws.created_at', 'DESC') // 최신 것 우선
+      .limit(limit)
+      .getMany();
+  }
+
   async save(service: WelfareService): Promise<WelfareService> {
     return this.repository.save(service);
   }

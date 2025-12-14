@@ -18,21 +18,39 @@
 ## 시스템 아키텍처
 
 ```
-┌─────────────┐         WebSocket          ┌─────────────┐
-│   Client    │◄─────Signaling────────────►│   Server    │
-│  (Browser)  │                             │  (NestJS)   │
-└─────────────┘                             └─────────────┘
-      │                                            │
-      │ WebRTC P2P Connection                     │
-      │ (Audio Stream)                            │
-      │                                            ▼
-      │                                    ┌──────────────┐
-      │                                    │  ChatGPT API │
-      │                                    │   (OpenAI)   │
-      │                                    └──────────────┘
-      │                                            │
-      │◄───────────AI Voice Response──────────────┘
+┌─────────────┐         WebSocket          ┌──────────────────┐
+│   Client    │◄─────Signaling────────────►│  SignalingGateway│
+│  (Browser)  │                             │    (NestJS)      │
+└─────────────┘                             └──────────────────┘
+      │                                              │
+      │                                              ▼
+      │                                      ┌──────────────┐
+      │◄──────WebRTC Peer Connection────────│  AICallPeer  │
+      │       (서버가 Peer로 참여!)           │   (werift)   │
+      │                                      └──────────────┘
+      │                                              │
+      │                                              ▼
+      │                                      ┌──────────────┐
+      │                                      │ ChatGPT API  │
+      │                                      │   (OpenAI)   │
+      │                                      └──────────────┘
+      │                                              │
+      │◄──────────AI Voice Response (실시간)─────────┘
+      │          (WebSocket + Base64)
 ```
+
+### 핵심 개선사항 🎯
+
+**이전 구조 (❌ 문제):**
+- WebRTC P2P만 지원 (클라이언트 ↔ 클라이언트)
+- 서버는 시그널링만 중계
+- AI 처리는 REST API로만 가능 (실시간 불가)
+
+**현재 구조 (✅ 해결):**
+- **서버가 WebRTC Peer로 직접 참여** (werift 라이브러리 사용)
+- **실시간 오디오 스트림 처리**
+- **RTP 패킷 디코딩 → STT → ChatGPT → TTS → 응답**
+- **WebSocket으로 AI 음성을 클라이언트에 실시간 전송**
 
 ## 설치 및 실행
 
@@ -49,7 +67,19 @@ OPENAI_MODEL=gpt-4o
 STUN_SERVER_URL=stun:stun.l.google.com:19302
 ```
 
-### 2. 서버 실행
+### 2. 패키지 설치
+
+```bash
+npm install
+```
+
+**주요 의존성:**
+- `werift` - 서버 측 WebRTC 구현 (순수 TypeScript)
+- `@nestjs/websockets` - WebSocket 지원
+- `socket.io` - 실시간 시그널링
+- `openai` - ChatGPT API 연동
+
+### 3. 서버 실행
 
 ```bash
 # 개발 모드
@@ -64,6 +94,29 @@ npm run start:prod
 - 🚀 **REST API**: http://localhost:3000/api/v1/calls
 - 🔌 **WebSocket Signaling**: ws://localhost:3000/signaling
 - 📚 **Swagger 문서**: http://localhost:3000/api/docs
+- 🎙️ **테스트 페이지**: http://localhost:3000/ai-call-test.html
+
+## 🚀 빠른 시작 (테스트)
+
+### 간편 테스트 방법
+
+1. **서버 실행**
+   ```bash
+   npm run start:dev
+   ```
+
+2. **브라우저 열기**
+   ```
+   http://localhost:3000/ai-call-test.html
+   ```
+
+3. **통화 시작 버튼 클릭**
+4. **마이크 권한 허용**
+5. **2~3초 대기하면 AI가 인사말** 🎉
+   > "안녕하세요! AI 상담원입니다. 무엇을 도와드릴까요?"
+6. **말을 하면 AI가 응답!**
+
+---
 
 ## API 사용법
 
@@ -348,12 +401,11 @@ GET /api/v1/calls/{callId}
 
 | 이벤트 | 데이터 | 설명 |
 |--------|--------|------|
-| `join-session` | `{ sessionId, peerId }` | 세션 참여 |
+| `join-session` | `{ sessionId, peerId, callId }` | 세션 참여 (**callId 필수!**) |
 | `offer` | `{ sessionId, peerId, offer }` | WebRTC Offer 전송 |
 | `answer` | `{ sessionId, peerId, answer }` | WebRTC Answer 전송 |
 | `ice-candidate` | `{ sessionId, peerId, candidate }` | ICE Candidate 전송 |
 | `leave-session` | `{ sessionId, peerId }` | 세션 나가기 |
-| `audio-data` | `{ sessionId, peerId, audioData, timestamp }` | 오디오 데이터 전송 |
 
 ### 서버 → 클라이언트
 
@@ -361,11 +413,12 @@ GET /api/v1/calls/{callId}
 |--------|--------|------|
 | `joined-session` | `{ sessionId, peerId }` | 세션 참여 완료 |
 | `peer-joined` | `{ peerId }` | 다른 피어 참여 |
-| `offer` | `{ peerId, offer }` | WebRTC Offer 수신 |
-| `answer` | `{ peerId, answer }` | WebRTC Answer 수신 |
+| `answer` | `{ peerId: 'ai-server', answer }` | **AI 서버의 WebRTC Answer** |
 | `ice-candidate` | `{ peerId, candidate }` | ICE Candidate 수신 |
+| `ai-audio-response` | `{ audioData: base64, timestamp }` | **AI 음성 응답** 🎙️ |
 | `peer-left` | `{ peerId }` | 피어 나감 |
 | `peer-disconnected` | `{ peerId }` | 피어 연결 끊김 |
+| `error` | `{ message }` | 에러 발생 |
 
 ## 통화 상태 흐름
 
@@ -396,21 +449,26 @@ src/modules/calls/
 │   │   ├── EndCall.use-case.ts
 │   │   └── ProcessAIConversation.use-case.ts
 │   ├── services/
-│   │   ├── AIConversationService.ts      # ChatGPT 통합
+│   │   ├── AIConversationService.ts      # ChatGPT 통합 (STT/TTS)
 │   │   └── WebRTCConfigService.ts        # WebRTC 설정
 │   └── dto/
 │
 ├── infrastructure/                 # 인프라 레이어
-│   └── repositories/
-│       └── CallRepository.ts      # 리포지토리 구현
+│   ├── repositories/
+│   │   └── CallRepository.ts      # 리포지토리 구현
+│   └── webrtc/                     # 🆕 WebRTC 구현
+│       └── AICallPeer.ts          # 서버 측 WebRTC Peer (werift)
 │
 ├── presentation/                   # 프레젠테이션 레이어
 │   ├── controllers/
 │   │   └── CallsController.ts     # REST API
 │   └── gateways/
-│       └── SignalingGateway.ts    # WebSocket
+│       └── SignalingGateway.ts    # WebSocket + AI Peer 관리
 │
 └── Calls.module.ts
+
+public/
+└── ai-call-test.html              # 🆕 테스트용 클라이언트
 ```
 
 ## ChatGPT 기능
@@ -437,9 +495,15 @@ src/modules/calls/
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
 | `PORT` | 서버 포트 | `3000` |
+| `NODE_ENV` | 실행 환경 | `development` |
 | `OPENAI_API_KEY` | OpenAI API 키 | **필수** |
 | `OPENAI_MODEL` | ChatGPT 모델 | `gpt-4o` |
 | `STUN_SERVER_URL` | STUN 서버 URL | `stun:stun.l.google.com:19302` |
+| `DB_HOST` | MySQL 호스트 | `localhost` |
+| `DB_PORT` | MySQL 포트 | `3306` |
+| `DB_USER` | MySQL 사용자명 | `root` |
+| `DB_PASSWORD` | MySQL 비밀번호 | **필수** |
+| `DB_NAME` | 데이터베이스 이름 | `mobok` |
 
 ## 보안 고려사항
 

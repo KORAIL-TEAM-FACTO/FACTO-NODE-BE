@@ -18,7 +18,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "script:test-central-welfare": "ts-node -r tsconfig-paths/register scripts/test-central-welfare-api.ts"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
@@ -27,12 +28,15 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/platform-socket.io": "^11.1.9",
+    "@nestjs/serve-static": "^5.0.4",
     "@nestjs/swagger": "^11.2.3",
     "@nestjs/typeorm": "^11.0.0",
     "@nestjs/websockets": "^11.1.9",
+    "@ricky0123/vad-node": "^0.0.3",
     "axios": "^1.13.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
+    "ffmpeg-static": "^5.3.0",
     "mysql2": "^3.15.3",
     "openai": "^6.10.0",
     "pg": "^8.16.3",
@@ -42,8 +46,10 @@
     "socket.io-client": "^4.8.1",
     "typeorm": "^0.3.28",
     "uuid": "^13.0.0",
+    "wav": "^1.0.2",
     "webrtc": "^1.14.1",
     "werift": "^0.22.2",
+    "whisper-node": "^1.1.1",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {

@@ -30,33 +30,23 @@ export class InitiateCallUseCase
   ) {}
 
   async execute(request: InitiateCallRequest): Promise<CallResponseDto> {
-    // 1. Check for active calls from this caller
-    const activeCalls =
-      await this.callRepository.findActiveCallsByCallerNumber(
-        request.callerNumber,
-      );
-
-    if (activeCalls.length > 0) {
-      throw new CallAlreadyActiveException(request.callerNumber);
-    }
-
-    // 2. Generate unique session ID
+    // 1. Generate unique session ID
     const sessionId = crypto.randomUUID();
 
-    // 3. Create call entity
+    // 2. Create call entity
     const call = Call.create(
       request.callerNumber,
       sessionId,
       request.receiverNumber,
     );
 
-    // 4. Start ringing
+    // 3. Start ringing
     call.startRinging();
 
-    // 5. Persist
+    // 4. Persist
     const savedCall = await this.callRepository.save(call);
 
-    // 6. Return DTO
+    // 5. Return DTO
     return CallResponseDto.fromEntity(savedCall);
   }
 }

@@ -1,6 +1,7 @@
 import { RTCPeerConnection, RTCSessionDescription } from 'werift';
 import { Logger } from '@nestjs/common';
 import { AIConversationService } from '../../application/services/AIConversationService';
+import * as wav from 'wav';
 
 /**
  * AI Call Peer - 서버 측 WebRTC Peer
@@ -23,6 +24,8 @@ export class AICallPeer {
     private readonly onAudioResponseCallback: (audioBuffer: Buffer) => void,
   ) {
     this.initializePeerConnection();
+    // 연결되면 초기 인사말 전송
+    this.sendInitialGreeting();
   }
 
   /**
@@ -142,11 +145,18 @@ export class AICallPeer {
       this.logger.log(`Processing ${chunksToProcess.length} audio chunks with AI`);
 
       // 오디오 버퍼 합치기
-      const audioBuffer = Buffer.concat(chunksToProcess);
+      const rawAudioBuffer = Buffer.concat(chunksToProcess);
+
+      this.logger.log(`Raw audio buffer: ${rawAudioBuffer.length} bytes`);
+
+      // RTP 패킷을 WAV 파일로 변환
+      const wavBuffer = await this.convertToWav(rawAudioBuffer);
+
+      this.logger.log(`WAV buffer created: ${wavBuffer.length} bytes`);
 
       // 1. STT (Speech to Text)
       const userMessage =
-        await this.aiConversationService.transcribeAudio(audioBuffer);
+        await this.aiConversationService.transcribeAudio(wavBuffer);
 
       if (!userMessage || userMessage.trim().length === 0) {
         this.logger.log('No speech detected in audio');
@@ -183,6 +193,40 @@ export class AICallPeer {
   }
 
   /**
+   * RTP 페이로드를 WAV 파일로 변환
+   */
+  private convertToWav(rawBuffer: Buffer): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const writer = new wav.Writer({
+        sampleRate: 48000,  // WebRTC 기본 샘플레이트
+        channels: 1,        // 모노
+        bitDepth: 16,       // 16-bit PCM
+      });
+
+      const chunks: Buffer[] = [];
+
+      writer.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+
+      writer.on('end', () => {
+        const wavBuffer = Buffer.concat(chunks);
+        this.logger.debug(`WAV conversion complete: ${wavBuffer.length} bytes`);
+        resolve(wavBuffer);
+      });
+
+      writer.on('error', (error) => {
+        this.logger.error(`WAV conversion error: ${error.message}`);
+        reject(error);
+      });
+
+      // PCM 데이터 쓰기
+      writer.write(rawBuffer);
+      writer.end();
+    });
+  }
+
+  /**
    * AI 오디오를 WebRTC로 전송
    */
   async sendAudioToClient(audioBuffer: Buffer): Promise<void> {
@@ -196,6 +240,31 @@ export class AICallPeer {
    */
   get localCandidates(): RTCIceCandidate[] {
     return Array.from(this.peerConnection.iceGatheringState as any);
+  }
+
+  /**
+   * 초기 인사말 전송
+   */
+  private async sendInitialGreeting(): Promise<void> {
+    try {
+      // 2초 후 인사말 전송 (연결 안정화 대기)
+      setTimeout(async () => {
+        this.logger.log('Sending initial greeting...');
+
+        const greeting = '안녕하세요! AI 상담원입니다. 무엇을 도와드릴까요?';
+
+        // TTS 생성
+        const audioBuffer =
+          await this.aiConversationService.textToSpeech(greeting);
+
+        this.logger.log(`Initial greeting audio generated: ${audioBuffer.length} bytes`);
+
+        // 클라이언트에게 전송
+        this.onAudioResponseCallback(audioBuffer);
+      }, 2000);
+    } catch (error) {
+      this.logger.error(`Failed to send initial greeting: ${error.message}`);
+    }
   }
 
   /**

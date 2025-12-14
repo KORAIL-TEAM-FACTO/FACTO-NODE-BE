@@ -22,6 +22,7 @@ import { SyncWelfareServicesUseCase } from './application/use-cases/SyncWelfareS
 import { GetWelfareServiceUseCase } from './application/use-cases/GetWelfareService.use-case';
 import { GetAllWelfareServicesUseCase } from './application/use-cases/GetAllWelfareServices.use-case';
 import { SearchWelfareServicesByRegionUseCase } from './application/use-cases/SearchWelfareServicesByRegion.use-case';
+import { SearchWelfareServicesByKeywordUseCase } from './application/use-cases/SearchWelfareServicesByKeyword.use-case';
 
 // Presentation
 import { WelfareServicesController } from './presentation/controllers/WelfareServicesController';
@@ -60,11 +61,13 @@ import { WelfareServicesController } from './presentation/controllers/WelfareSer
     GetWelfareServiceUseCase,
     GetAllWelfareServicesUseCase,
     SearchWelfareServicesByRegionUseCase,
+    SearchWelfareServicesByKeywordUseCase,
   ],
   exports: [
     WELFARE_SERVICE_REPOSITORY,
     API_CACHE_REPOSITORY,
     AISummaryService,
+    SearchWelfareServicesByKeywordUseCase, // AI에서 사용하도록 export
   ],
 })
 export class WelfareServicesModule {}

@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Call - Simple WebSocket</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin: 20px 0;
+      justify-content: center;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    #startCall {
+      background: #4CAF50;
+      color: white;
+    }
+    #startCall:hover {
+      background: #45a049;
+    }
+    #startCall:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    #endCall {
+      background: #f44336;
+      color: white;
+    }
+    #endCall:hover {
+      background: #da190b;
+    }
+    #endCall:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .status {
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 5px;
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+    .status.error {
+      background: #ffebee;
+      color: #c62828;
+    }
+    .status.success {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    .log {
+      background: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      max-height: 400px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    .log-entry {
+      margin: 5px 0;
+      padding: 5px;
+      border-left: 3px solid #ddd;
+      padding-left: 10px;
+    }
+    .log-entry.info {
+      border-color: #2196F3;
+    }
+    .log-entry.success {
+      border-color: #4CAF50;
+    }
+    .log-entry.error {
+      border-color: #f44336;
+      color: #c62828;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🤖 AI Call (Simple WebSocket)</h1>
+
+    <div class="controls">
+      <button id="startCall">📞 통화 시작</button>
+      <button id="endCall" disabled>📴 통화 종료</button>
+    </div>
+
+    <div id="status" class="status">
+      대기 중... "통화 시작" 버튼을 눌러주세요.
+    </div>
+
+    <h3>로그</h3>
+    <div id="log" class="log"></div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script>
+    let socket;
+    let callId;
+    let sessionId;
+    let mediaRecorder;
+    let audioStream;
+    let isRecording = false;
+
+    // 페이지 로드 시 이전 통화 정리
+    window.addEventListener('load', async () => {
+      const lastCallId = localStorage.getItem('lastCallId');
+      if (lastCallId) {
+        log('⚠️ 이전 통화 세션 정리 중...', 'info');
+        try {
+          await fetch(`http://localhost:3000/api/v1/calls/${lastCallId}/end`, {
+            method: 'POST'
+          });
+          log('✅ 이전 통화 종료됨', 'success');
+        } catch (e) {
+          // 무시 (이미 종료된 통화일 수 있음)
+        }
+        localStorage.removeItem('lastCallId');
+      }
+    });
+
+    const startCallBtn = document.getElementById('startCall');
+    const endCallBtn = document.getElementById('endCall');
+    const statusDiv = document.getElementById('status');
+    const logDiv = document.getElementById('log');
+
+    // 로그 함수
+    function log(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logDiv.appendChild(entry);
+      logDiv.scrollTop = logDiv.scrollHeight;
+      console.log(message);
+    }
+
+    // 상태 업데이트
+    function updateStatus(message, type = 'info') {
+      statusDiv.textContent = message;
+      statusDiv.className = `status ${type}`;
+    }
+
+    // 통화 시작
+    startCallBtn.onclick = async () => {
+      try {
+        log('통화 시작...', 'info');
+        updateStatus('🔄 연결 중...', 'info');
+
+        // 1. 통화 생성
+        const callRes = await fetch('http://localhost:3000/api/v1/calls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callerNumber: '01012345678' })
+        });
+
+        if (!callRes.ok) {
+          const errorData = await callRes.json();
+
+          // 409 에러 (이미 진행 중인 통화)
+          if (callRes.status === 409) {
+            log('❌ 이미 진행 중인 통화가 있습니다.', 'error');
+            log('💡 페이지를 새로고침(F5)하거나 서버를 재시작하세요.', 'info');
+            updateStatus('❌ 이미 진행 중인 통화가 있습니다. 페이지 새로고침(F5)하세요.', 'error');
+            return;
+          }
+
+          throw new Error(errorData.message || 'Failed to create call');
+        }
+
+        const callData = await callRes.json();
+
+        if (!callData.success || !callData.data || !callData.data.call) {
+          throw new Error('Invalid response from server');
+        }
+
+        callId = callData.data.call.id;
+        sessionId = callData.data.call.sessionId;
+
+        // localStorage에 저장 (페이지 새로고침 시 정리용)
+        localStorage.setItem('lastCallId', callId);
+
+        log(`✅ Call created: ${callId}`, 'success');
+
+        // 2. WebSocket 연결
+        socket = io('http://localhost:3000/signaling');
+
+        socket.on('connect', () => {
+          log('✅ WebSocket connected', 'success');
+
+          // 세션 참여
+          socket.emit('join-session', {
+            sessionId,
+            peerId: 'client-' + Date.now(),
+            callId
+          });
+        });
+
+        // 3. AI 오디오 응답 수신
+        socket.on('ai-audio-response', ({ audioData }) => {
+          log('🔊 AI 응답 수신', 'success');
+
+          // Base64 → Blob → 재생
+          const audioBlob = base64ToBlob(audioData, 'audio/mp3');
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+          audio.play();
+
+          updateStatus('✅ AI 응답 재생 중...', 'success');
+        });
+
+        socket.on('error', (error) => {
+          log(`❌ Error: ${error.message}`, 'error');
+          updateStatus('❌ 연결 실패', 'error');
+        });
+
+        // 4. 마이크 권한
+        log('마이크 권한 요청...', 'info');
+        audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+        log('✅ 마이크 허용', 'success');
+
+        // 5. MediaRecorder 설정
+        mediaRecorder = new MediaRecorder(audioStream, {
+          mimeType: 'audio/webm'
+        });
+
+        let audioChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          if (audioChunks.length === 0) return;
+
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          audioChunks = [];
+
+          // Blob → ArrayBuffer → Base64
+          const arrayBuffer = await audioBlob.arrayBuffer();
+          const base64 = arrayBufferToBase64(arrayBuffer);
+
+          log(`📤 오디오 전송 (${audioBlob.size} bytes)`, 'info');
+
+          // WebSocket으로 오디오 전송
+          socket.emit('user-audio', {
+            sessionId,
+            callId,
+            audioData: base64,
+            mimeType: 'audio/webm'
+          });
+        };
+
+        // 6. 녹음 시작 (3초마다)
+        mediaRecorder.start();
+        isRecording = true;
+
+        setInterval(() => {
+          if (isRecording && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            setTimeout(() => {
+              if (isRecording) {
+                mediaRecorder.start();
+              }
+            }, 100);
+          }
+        }, 3000);
+
+        // 7. 통화 연결
+        await fetch(`http://localhost:3000/api/v1/calls/${callId}/connect`, {
+          method: 'POST'
+        });
+
+        log('✅ 통화 연결 완료', 'success');
+        updateStatus('✅ AI와 연결됨! 말씀하세요.', 'success');
+
+        startCallBtn.disabled = true;
+        endCallBtn.disabled = false;
+
+      } catch (error) {
+        log(`❌ 오류: ${error.message}`, 'error');
+        updateStatus('❌ 연결 실패', 'error');
+      }
+    };
+
+    // 통화 종료
+    endCallBtn.onclick = async () => {
+      try {
+        log('통화 종료...', 'info');
+        isRecording = false;
+
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();
+        }
+
+        if (audioStream) {
+          audioStream.getTracks().forEach(track => track.stop());
+        }
+
+        if (socket) {
+          socket.emit('leave-session', { sessionId, peerId: 'client-' + Date.now() });
+          socket.disconnect();
+        }
+
+        if (callId) {
+          await fetch(`http://localhost:3000/api/v1/calls/${callId}/end`, {
+            method: 'POST'
+          });
+        }
+
+        // localStorage 정리
+        localStorage.removeItem('lastCallId');
+
+        log('✅ 통화 종료', 'success');
+        updateStatus('통화 종료됨', 'info');
+
+        startCallBtn.disabled = false;
+        endCallBtn.disabled = true;
+
+      } catch (error) {
+        log(`❌ 종료 오류: ${error.message}`, 'error');
+      }
+    };
+
+    // Helper functions
+    function base64ToBlob(base64, contentType) {
+      const byteCharacters = atob(base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      return new Blob([byteArray], { type: contentType });
+    }
+
+    function arrayBufferToBase64(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    }
+  </script>
+</body>
+</html>

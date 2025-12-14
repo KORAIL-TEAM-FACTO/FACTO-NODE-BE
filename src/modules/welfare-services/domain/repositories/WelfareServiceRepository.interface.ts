@@ -9,6 +9,7 @@ export interface IWelfareServiceRepository {
   findById(id: string): Promise<WelfareService | null>;
   findByRegion(ctpvNm: string, sggNm?: string): Promise<WelfareService[]>;
   findAll(page: number, limit: number): Promise<{ data: WelfareService[]; total: number }>;
+  searchByKeyword(keyword: string, limit: number): Promise<WelfareService[]>;
   save(service: WelfareService): Promise<WelfareService>;
   saveMany(services: WelfareService[]): Promise<WelfareService[]>;
   update(service: WelfareService): Promise<WelfareService>;
