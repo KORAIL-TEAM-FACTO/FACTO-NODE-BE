@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRTC AI Call Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin: 20px 0;
+      justify-content: center;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    #startCall {
+      background: #4CAF50;
+      color: white;
+    }
+    #startCall:hover {
+      background: #45a049;
+    }
+    #startCall:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    #endCall {
+      background: #f44336;
+      color: white;
+    }
+    #endCall:hover {
+      background: #da190b;
+    }
+    #endCall:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .status {
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 5px;
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+    .status.error {
+      background: #ffebee;
+      color: #c62828;
+    }
+    .status.success {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    .log {
+      background: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    .log-entry {
+      margin: 5px 0;
+      padding: 5px;
+      border-left: 3px solid #ddd;
+      padding-left: 10px;
+    }
+    .log-entry.info {
+      border-color: #2196F3;
+    }
+    .log-entry.success {
+      border-color: #4CAF50;
+    }
+    .log-entry.error {
+      border-color: #f44336;
+      color: #c62828;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🤖 WebRTC AI Call Test</h1>
+
+    <div class="controls">
+      <button id="startCall">📞 통화 시작</button>
+      <button id="endCall" disabled>📴 통화 종료</button>
+    </div>
+
+    <div id="status" class="status">
+      대기 중... "통화 시작" 버튼을 눌러주세요.
+    </div>
+
+    <h3>로그</h3>
+    <div id="log" class="log"></div>
+
+    <audio id="remoteAudio" autoplay></audio>
+  </div>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script>
+    let peerConnection;
+    let localStream;
+    let socket;
+    let callId;
+    let sessionId;
+
+    const startCallBtn = document.getElementById('startCall');
+    const endCallBtn = document.getElementById('endCall');
+    const statusDiv = document.getElementById('status');
+    const logDiv = document.getElementById('log');
+    const remoteAudio = document.getElementById('remoteAudio');
+
+    // 로그 함수
+    function log(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logDiv.appendChild(entry);
+      logDiv.scrollTop = logDiv.scrollHeight;
+      console.log(message);
+    }
+
+    // 상태 업데이트
+    function updateStatus(message, type = 'info') {
+      statusDiv.textContent = message;
+      statusDiv.className = `status ${type}`;
+    }
+
+    // 통화 시작
+    startCallBtn.onclick = async () => {
+      try {
+        log('통화 시작 프로세스 시작...', 'info');
+        updateStatus('🔄 연결 중...', 'info');
+
+        // 1. WebRTC 설정 가져오기
+        log('1. WebRTC 설정 조회 중...', 'info');
+        const configRes = await fetch('http://localhost:3000/api/v1/calls/config');
+        const configData = await configRes.json();
+        const rtcConfig = configData.data.config;
+        log('✅ WebRTC 설정 조회 완료', 'success');
+
+        // 2. 통화 시작 API 호출
+        log('2. 통화 생성 중...', 'info');
+        const callRes = await fetch('http://localhost:3000/api/v1/calls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            callerNumber: '01012345678'
+          })
+        });
+        const callData = await callRes.json();
+        callId = callData.data.call.id;
+        sessionId = callData.data.call.sessionId;
+        log(`✅ 통화 생성 완료 - Call ID: ${callId}`, 'success');
+
+        // 3. WebSocket 연결
+        log('3. WebSocket 시그널링 서버 연결 중...', 'info');
+        socket = io('http://localhost:3000/signaling');
+
+        socket.on('connect', () => {
+          log('✅ WebSocket 연결 완료', 'success');
+        });
+
+        socket.on('error', (error) => {
+          log(`❌ 에러: ${error.message}`, 'error');
+          updateStatus('❌ 연결 실패', 'error');
+        });
+
+        // 4. 마이크 권한 요청 및 로컬 스트림 가져오기
+        log('4. 마이크 권한 요청 중...', 'info');
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          },
+          video: false
+        });
+        log('✅ 마이크 접근 허용됨', 'success');
+
+        // 5. RTCPeerConnection 생성
+        log('5. WebRTC Peer Connection 생성 중...', 'info');
+        peerConnection = new RTCPeerConnection(rtcConfig);
+
+        // 6. 로컬 스트림 추가
+        localStream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, localStream);
+          log(`트랙 추가: ${track.kind}`, 'info');
+        });
+
+        // 7. 원격 스트림 수신 핸들러
+        peerConnection.ontrack = (event) => {
+          log(`원격 트랙 수신: ${event.track.kind}`, 'success');
+          remoteAudio.srcObject = event.streams[0];
+        };
+
+        // 8. ICE Candidate 핸들러
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit('ice-candidate', {
+              sessionId,
+              peerId: 'client-peer',
+              candidate: event.candidate
+            });
+            log('ICE candidate 전송', 'info');
+          }
+        };
+
+        // 연결 상태 모니터링
+        peerConnection.oniceconnectionstatechange = () => {
+          log(`ICE 연결 상태: ${peerConnection.iceConnectionState}`, 'info');
+        };
+
+        peerConnection.onconnectionstatechange = () => {
+          log(`연결 상태: ${peerConnection.connectionState}`, 'info');
+          if (peerConnection.connectionState === 'connected') {
+            updateStatus('✅ AI와 통화 연결됨! 말씀해보세요.', 'success');
+          }
+        };
+
+        // 9. 세션 참여
+        log('6. 세션 참여 중...', 'info');
+        socket.emit('join-session', {
+          sessionId,
+          peerId: 'client-peer',
+          callId
+        });
+
+        socket.on('joined-session', () => {
+          log('✅ 세션 참여 완료', 'success');
+        });
+
+        // 10. Offer 생성 및 전송
+        log('7. WebRTC Offer 생성 중...', 'info');
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        log('✅ Local Description 설정 완료', 'success');
+
+        socket.emit('offer', {
+          sessionId,
+          peerId: 'client-peer',
+          offer
+        });
+        log('✅ Offer 전송 완료', 'success');
+
+        // 11. Answer 수신
+        socket.on('answer', async ({ peerId, answer }) => {
+          log(`Answer 수신 from ${peerId}`, 'success');
+          await peerConnection.setRemoteDescription(answer);
+          log('✅ Remote Description 설정 완료', 'success');
+        });
+
+        // 12. ICE Candidate 수신
+        socket.on('ice-candidate', async ({ peerId, candidate }) => {
+          await peerConnection.addIceCandidate(candidate);
+          log(`ICE candidate 수신 from ${peerId}`, 'info');
+        });
+
+        // 13. AI 오디오 응답 수신
+        socket.on('ai-audio-response', ({ audioData, timestamp }) => {
+          log('🤖 AI 음성 응답 수신!', 'success');
+
+          // Base64 디코딩 및 오디오 재생
+          const audioBlob = base64ToBlob(audioData, 'audio/mp3');
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+          audio.play();
+          log('🔊 AI 응답 재생 중...', 'success');
+        });
+
+        // 14. 통화 연결 API 호출
+        log('8. 통화 연결 중...', 'info');
+        await fetch(`http://localhost:3000/api/v1/calls/${callId}/connect`, {
+          method: 'POST'
+        });
+        log('✅ 통화 연결 완료!', 'success');
+
+        // UI 업데이트
+        startCallBtn.disabled = true;
+        endCallBtn.disabled = false;
+        updateStatus('🎙️ 통화 연결 중... AI가 응답할 준비를 하고 있습니다.', 'info');
+
+      } catch (error) {
+        log(`❌ 오류 발생: ${error.message}`, 'error');
+        updateStatus('❌ 연결 실패: ' + error.message, 'error');
+        console.error(error);
+      }
+    };
+
+    // 통화 종료
+    endCallBtn.onclick = async () => {
+      try {
+        log('통화 종료 중...', 'info');
+
+        // 1. 통화 종료 API 호출
+        if (callId) {
+          await fetch(`http://localhost:3000/api/v1/calls/${callId}/end`, {
+            method: 'POST'
+          });
+          log('✅ 통화 종료 API 호출 완료', 'success');
+        }
+
+        // 2. PeerConnection 종료
+        if (peerConnection) {
+          peerConnection.close();
+          log('✅ Peer Connection 종료', 'success');
+        }
+
+        // 3. 로컬 스트림 종료
+        if (localStream) {
+          localStream.getTracks().forEach(track => {
+            track.stop();
+            log(`트랙 중지: ${track.kind}`, 'info');
+          });
+        }
+
+        // 4. WebSocket 연결 종료
+        if (socket) {
+          socket.emit('leave-session', { sessionId, peerId: 'client-peer' });
+          socket.disconnect();
+          log('✅ WebSocket 연결 종료', 'success');
+        }
+
+        // UI 업데이트
+        startCallBtn.disabled = false;
+        endCallBtn.disabled = true;
+        updateStatus('통화 종료됨. 다시 시작하려면 "통화 시작"을 누르세요.', 'info');
+        log('✅ 모든 리소스 정리 완료', 'success');
+
+      } catch (error) {
+        log(`❌ 종료 중 오류: ${error.message}`, 'error');
+        console.error(error);
+      }
+    };
+
+    // Base64를 Blob으로 변환
+    function base64ToBlob(base64, contentType) {
+      const byteCharacters = atob(base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      return new Blob([byteArray], { type: contentType });
+    }
+  </script>
+</body>
+</html>

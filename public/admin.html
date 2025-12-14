@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobok 백오피스</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+            background: #f9fafb;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #191f28;
+            text-align: left;
+            margin-bottom: 8px;
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .subtitle {
+            color: #4e5968;
+            font-size: 1rem;
+            font-weight: 400;
+            margin-bottom: 32px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+            border: 1px solid #f2f4f6;
+        }
+
+        h2 {
+            color: #191f28;
+            margin-bottom: 24px;
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }
+
+        .btn {
+            background: #3182f6;
+            color: white;
+            border: none;
+            padding: 14px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            letter-spacing: -0.3px;
+        }
+
+        .btn:hover {
+            background: #1b64da;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn:disabled {
+            background: #e5e8eb;
+            color: #8b95a1;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #f2f4f6;
+            color: #4e5968;
+        }
+
+        .btn-secondary:hover {
+            background: #e5e8eb;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .checkbox-wrapper {
+            margin: 20px 0;
+            padding: 16px;
+            background: #f9fafb;
+            border-radius: 12px;
+        }
+
+        .checkbox-wrapper label {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 15px;
+            cursor: pointer;
+            color: #191f28;
+            font-weight: 500;
+        }
+
+        .checkbox-wrapper input[type="checkbox"] {
+            width: 24px;
+            height: 24px;
+            cursor: pointer;
+            accent-color: #3182f6;
+        }
+
+        .log-box {
+            background: #f9fafb;
+            border: 1px solid #e5e8eb;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .log-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #f2f4f6;
+            color: #4e5968;
+        }
+
+        .log-item:last-child {
+            border-bottom: none;
+        }
+
+        .log-success {
+            color: #00c73c;
+            font-weight: 500;
+        }
+
+        .log-error {
+            color: #f04452;
+            font-weight: 500;
+        }
+
+        .log-info {
+            color: #3182f6;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-top: 24px;
+        }
+
+        .stat-box {
+            background: #f9fafb;
+            border: 1px solid #e5e8eb;
+            padding: 24px;
+            border-radius: 12px;
+            text-align: left;
+            transition: all 0.2s ease;
+        }
+
+        .stat-box:hover {
+            border-color: #3182f6;
+            box-shadow: 0 4px 12px rgba(49, 130, 246, 0.1);
+        }
+
+        .stat-number {
+            font-size: 2.25rem;
+            font-weight: 700;
+            color: #191f28;
+            margin-bottom: 4px;
+            letter-spacing: -1px;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: #8b95a1;
+            font-weight: 500;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .table th {
+            background: #f9fafb;
+            color: #4e5968;
+            padding: 16px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+            border-bottom: 1px solid #e5e8eb;
+            letter-spacing: -0.2px;
+        }
+
+        .table td {
+            padding: 16px;
+            border-bottom: 1px solid #f2f4f6;
+            color: #191f28;
+            font-size: 14px;
+        }
+
+        .table tr:hover {
+            background: #f9fafb;
+        }
+
+        .table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: -0.2px;
+        }
+
+        .badge-local {
+            background: #e8f5e9;
+            color: #00c73c;
+        }
+
+        .badge-central {
+            background: #e3f2fd;
+            color: #3182f6;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #8b95a1;
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 16px;
+        }
+
+        .empty-state-text {
+            font-size: 15px;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Mobok 백오피스</h1>
+        <p class="subtitle">복지 서비스 데이터를 관리합니다</p>
+
+        <!-- 복지 서비스 동기화 -->
+        <div class="card">
+            <h2>복지 서비스 동기화</h2>
+
+            <div class="checkbox-wrapper">
+                <label>
+                    <input type="checkbox" id="generateAiSummary" checked>
+                    AI 요약 생성 (OpenAI 사용)
+                </label>
+            </div>
+
+            <div class="btn-group">
+                <button class="btn" onclick="syncWelfareServices()">
+                    동기화 시작
+                </button>
+                <button class="btn btn-secondary" onclick="clearLogs()">
+                    로그 삭제
+                </button>
+            </div>
+
+            <div class="log-box" id="syncLog">
+                <div class="log-item log-info">로그가 여기에 표시됩니다...</div>
+            </div>
+
+            <div class="stats" id="syncStats" style="display: none;">
+                <div class="stat-box">
+                    <div class="stat-number" id="statSynced">0</div>
+                    <div class="stat-label">총 동기화</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="statCreated">0</div>
+                    <div class="stat-label">생성됨</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="statUpdated">0</div>
+                    <div class="stat-label">업데이트됨</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="statAi">0</div>
+                    <div class="stat-label">AI 요약 생성</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 복지 서비스 목록 -->
+        <div class="card">
+            <h2>복지 서비스 목록</h2>
+
+            <div class="btn-group">
+                <button class="btn" onclick="loadWelfareServices()">
+                    목록 조회
+                </button>
+            </div>
+
+            <div id="servicesTable"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+
+        function addLog(message, type = 'info') {
+            const logBox = document.getElementById('syncLog');
+            const logItem = document.createElement('div');
+            logItem.className = `log-item log-${type}`;
+            const timestamp = new Date().toLocaleTimeString('ko-KR');
+            logItem.textContent = `[${timestamp}] ${message}`;
+            logBox.appendChild(logItem);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function clearLogs() {
+            const logBox = document.getElementById('syncLog');
+            logBox.innerHTML = '<div class="log-item log-info">로그가 삭제되었습니다.</div>';
+            document.getElementById('syncStats').style.display = 'none';
+        }
+
+        async function syncWelfareServices() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '동기화 중<span class="loading"></span>';
+
+            const generateAiSummary = document.getElementById('generateAiSummary').checked;
+
+            addLog('복지 서비스 동기화를 시작합니다...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE}/v1/welfare-services/sync?generateAiSummary=${generateAiSummary}`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const data = result.data;
+                    addLog(`동기화 완료!`, 'success');
+                    addLog(`총 ${data.synced}개 동기화 (생성: ${data.created}, 업데이트: ${data.updated})`, 'success');
+                    addLog(`지자체: ${data.local.synced}개 (생성: ${data.local.created}, 업데이트: ${data.local.updated})`, 'info');
+                    addLog(`중앙부처: ${data.central.synced}개 (생성: ${data.central.created}, 업데이트: ${data.central.updated})`, 'info');
+
+                    if (generateAiSummary) {
+                        addLog(`AI 요약 ${data.aiSummaryGenerated}개 생성`, 'success');
+                    }
+
+                    // 통계 표시
+                    document.getElementById('syncStats').style.display = 'grid';
+                    document.getElementById('statSynced').textContent = data.synced;
+                    document.getElementById('statCreated').textContent = data.created;
+                    document.getElementById('statUpdated').textContent = data.updated;
+                    document.getElementById('statAi').textContent = data.aiSummaryGenerated;
+                } else {
+                    addLog(`오류: ${result.message || '알 수 없는 오류'}`, 'error');
+                }
+            } catch (error) {
+                addLog(`네트워크 오류: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '동기화 시작';
+            }
+        }
+
+        async function loadWelfareServices() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '조회 중<span class="loading"></span>';
+
+            try {
+                const response = await fetch(`${API_BASE}/v1/welfare-services?page=1&limit=20`);
+                const result = await response.json();
+
+                if (result.success) {
+                    const services = result.data.services;
+
+                    let tableHtml = `
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>구분</th>
+                                    <th>서비스명</th>
+                                    <th>지역</th>
+                                    <th>소관부처</th>
+                                    <th>AI 요약</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
+
+                    services.forEach(service => {
+                        const typeLabel = service.serviceType === 'LOCAL' ? '지자체' : '중앙부처';
+                        const badgeClass = service.serviceType === 'LOCAL' ? 'badge-local' : 'badge-central';
+                        const region = service.serviceType === 'LOCAL'
+                            ? `${service.ctpvNm} ${service.sggNm || ''}`
+                            : '전국';
+                        const department = service.serviceType === 'LOCAL'
+                            ? service.bizChrDeptNm || '-'
+                            : service.department || '-';
+                        const aiSummary = service.aiSummary || '미생성';
+
+                        tableHtml += `
+                            <tr>
+                                <td><span class="badge ${badgeClass}">${typeLabel}</span></td>
+                                <td>${service.serviceName}</td>
+                                <td>${region}</td>
+                                <td>${department}</td>
+                                <td>${aiSummary}</td>
+                            </tr>
+                        `;
+                    });
+
+                    tableHtml += `
+                            </tbody>
+                        </table>
+                    `;
+
+                    document.getElementById('servicesTable').innerHTML = tableHtml;
+                } else {
+                    document.getElementById('servicesTable').innerHTML =
+                        '<div class="log-item log-error">데이터 로드 실패</div>';
+                }
+            } catch (error) {
+                document.getElementById('servicesTable').innerHTML =
+                    `<div class="log-item log-error">오류: ${error.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '목록 조회';
+            }
+        }
+    </script>
+</body>
+</html>
