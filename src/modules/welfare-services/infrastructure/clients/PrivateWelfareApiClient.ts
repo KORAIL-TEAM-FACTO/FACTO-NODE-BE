@@ -120,6 +120,13 @@ export class PrivateWelfareApiClient {
         this.logger.error(`Rate limit exceeded for private welfare list: ${error.message}`);
         throw new RateLimitExceededException('민간 복지 API', error.response?.data);
       }
+
+      // 400 에러는 페이지가 범위를 벗어난 경우 (더 이상 데이터 없음)
+      if (error.response?.status === 400) {
+        this.logger.warn(`Page ${page} is out of range (400 Bad Request). Returning empty array.`);
+        return [];
+      }
+
       this.logger.error(`Failed to fetch private welfare list: ${error.message}`);
       throw new ApiRequestFailedException(error.message);
     }

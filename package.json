@@ -49,7 +49,6 @@
     "wav": "^1.0.2",
     "webrtc": "^1.14.1",
     "werift": "^0.22.2",
-    "whisper-node": "^1.1.1",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {

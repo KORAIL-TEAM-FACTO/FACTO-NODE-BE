@@ -126,6 +126,13 @@ export class CentralWelfareApiClient {
         this.logger.error(`Rate limit exceeded for central welfare list: ${error.message}`);
         throw new RateLimitExceededException('중앙부처 복지 API', error.response?.data);
       }
+
+      // 400 에러는 페이지가 범위를 벗어난 경우 (더 이상 데이터 없음)
+      if (error.response?.status === 400) {
+        this.logger.warn(`Page ${page} is out of range (400 Bad Request). Returning empty array.`);
+        return [];
+      }
+
       this.logger.error(`Failed to fetch central welfare list: ${error.message}`);
       throw new ApiRequestFailedException(error.message);
     }

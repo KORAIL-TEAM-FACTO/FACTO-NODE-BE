@@ -15,7 +15,6 @@ import { ProcessAIConversationUseCase } from './application/use-cases/ProcessAIC
 import { AIConversationService } from './application/services/AIConversationService';
 import { WebRTCConfigService } from './application/services/WebRTCConfigService';
 import { VoiceActivityDetectionService } from './application/services/VoiceActivityDetectionService';
-import { LocalSTTService } from './application/services/LocalSTTService';
 
 // Infrastructure Layer
 import { CallEntity } from './infrastructure/persistence/CallEntity';
@@ -48,7 +47,6 @@ import { WelfareServicesModule } from '../welfare-services/WelfareServices.modul
     AIConversationService,
     WebRTCConfigService,
     VoiceActivityDetectionService,
-    LocalSTTService,
 
     // Use Cases
     InitiateCallUseCase,
