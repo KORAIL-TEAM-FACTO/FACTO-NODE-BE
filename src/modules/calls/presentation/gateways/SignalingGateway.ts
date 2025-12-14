@@ -43,6 +43,12 @@ export class SignalingGateway
     { socketId: string; peerId: string; callId?: string }
   >();
   private readonly aiPeers = new Map<string, AICallPeer>();
+  private readonly greetingSent = new Set<string>(); // 인사말 전송 여부 추적
+  private readonly processingAudio = new Map<string, boolean>(); // 세션별 오디오 처리 중 플래그
+  private readonly conversationHistory = new Map<
+    string,
+    { role: 'user' | 'assistant'; content: string }[]
+  >(); // 세션별 대화 히스토리
 
   constructor(
     private readonly aiConversationService: AIConversationService,
@@ -69,6 +75,15 @@ export class SignalingGateway
           this.aiPeers.delete(sessionId);
           this.logger.log(`AI Peer closed for session ${sessionId}`);
         }
+
+        // Clear greeting sent flag
+        this.greetingSent.delete(sessionId);
+
+        // Clear processing flag
+        this.processingAudio.delete(sessionId);
+
+        // Clear conversation history
+        this.conversationHistory.delete(sessionId);
 
         // Notify peer about disconnection
         this.server.to(sessionId).emit('peer-disconnected', {
@@ -124,11 +139,25 @@ export class SignalingGateway
 
     this.logger.log(`Received offer from ${peerId} in session ${sessionId}`);
 
-    // Get session info
-    const session = this.sessions.get(sessionId);
-    if (!session || !session.callId) {
-      this.logger.warn(`No session or callId found for ${sessionId}`);
-      return;
+    // Get session info or create new one
+    let session = this.sessions.get(sessionId);
+
+    // If session doesn't exist, try to get callId from connect endpoint
+    // This is a fallback for when join-session wasn't called
+    if (!session) {
+      this.logger.warn(`Session not found for ${sessionId}, creating fallback session`);
+      client.join(sessionId);
+      session = {
+        socketId: client.id,
+        peerId,
+        callId: sessionId, // Use sessionId as callId fallback
+      };
+      this.sessions.set(sessionId, session);
+    }
+
+    if (!session.callId) {
+      this.logger.warn(`No callId found for ${sessionId}, using sessionId as fallback`);
+      session.callId = sessionId;
     }
 
     // Create AI Peer for this session
@@ -159,6 +188,32 @@ export class SignalingGateway
       });
 
       this.logger.log(`AI Peer answer sent for session ${sessionId}`);
+
+      // ICE 연결 안정화 대기 후 인사말 전송 (세션당 한 번만)
+      if (!this.greetingSent.has(sessionId)) {
+        this.greetingSent.add(sessionId);
+
+        setTimeout(async () => {
+          const greetingMessage = '안녕하세요';
+          this.logger.log(`Sending greeting message to session ${sessionId}`);
+
+          try {
+            const greetingAudio = await this.aiConversationService.textToSpeech(
+              greetingMessage,
+              'echo',
+            );
+
+            this.server.to(sessionId).emit('ai-audio-response', {
+              audioData: greetingAudio.toString('base64'),
+              timestamp: Date.now(),
+            });
+
+            this.logger.log(`✅ Greeting sent to session ${sessionId}`);
+          } catch (error) {
+            this.logger.error(`Failed to send greeting: ${error.message}`);
+          }
+        }, 2000); // ICE 연결 안정화 대기
+      }
     } catch (error) {
       this.logger.error(`Failed to handle offer: ${error.message}`);
       client.emit('error', {
@@ -235,6 +290,12 @@ export class SignalingGateway
     // Remove from sessions
     this.sessions.delete(sessionId);
 
+    // Clear greeting sent flag
+    this.greetingSent.delete(sessionId);
+
+    // Clear processing flag
+    this.processingAudio.delete(sessionId);
+
     // Notify others
     client.to(sessionId).emit('peer-left', { peerId });
 
@@ -257,9 +318,20 @@ export class SignalingGateway
   ): Promise<void> {
     const { sessionId, callId, audioData, mimeType } = data;
 
+    // 🔒 이미 처리 중이면 무시 (중복 요청 방지)
+    if (this.processingAudio.get(sessionId)) {
+      this.logger.log(
+        `⚠️ Already processing audio for session ${sessionId} - ignoring duplicate request`,
+      );
+      return;
+    }
+
     this.logger.log(
       `Received user audio for session ${sessionId} (${audioData.length} chars)`,
     );
+
+    // 🔒 처리 시작 - 플래그 설정
+    this.processingAudio.set(sessionId, true);
 
     try {
       // Base64 → Buffer
@@ -272,6 +344,10 @@ export class SignalingGateway
         // 20KB 미만은 무시 (클라이언트와 동일한 임계값)
         this.logger.log(
           `⚠️ Audio too small (${(audioBuffer.length / 1024).toFixed(1)}KB < 20KB) - ignored`,
+        );
+        await this.sendFeedbackResponse(
+          sessionId,
+          '죄송합니다, 잘 들리지 않았어요. 다시 말씀해주시겠어요?',
         );
         return;
       }
@@ -287,6 +363,10 @@ export class SignalingGateway
       // 🔇 음성 인식 결과 검증
       if (!userMessage || userMessage.trim().length === 0) {
         this.logger.log('⚠️ No speech detected - empty transcription');
+        await this.sendFeedbackResponse(
+          sessionId,
+          '죄송합니다, 말씀을 잘 못 알아들었어요. 다시 한번 말씀해주시겠어요?',
+        );
         return;
       }
 
@@ -294,6 +374,10 @@ export class SignalingGateway
       if (userMessage.trim().length < 3) {
         this.logger.log(
           `⚠️ Speech too short (${userMessage.trim().length} chars): "${userMessage}" - ignored`,
+        );
+        await this.sendFeedbackResponse(
+          sessionId,
+          '죄송합니다, 잘 들리지 않았어요. 다시 말씀해주시겠어요?',
         );
         return;
       }
@@ -303,14 +387,25 @@ export class SignalingGateway
         /^(아+|음+|어+|네+|예+|으+|흠+)$/i, // 추임새
         /시청.*감사/i, // 유튜브 엔딩
         /구독.*좋아요/i, // 유튜브 광고
+        /좋아요.*구독/i, // 유튜브 광고 (순서 바뀐 버전)
+        /thumbs.*up.*subscribe/i, // 영어 유튜브
+        /subscribe.*like/i, // 영어 유튜브
+        /영상.*편집.*감사/i, // 유튜브 크레딧
+        /뉴스.*입니다/i, // 뉴스 오프닝
+        /mbc|sbs|kbs|jtbc/i, // 방송사명
         /배경.*잡음/i, // Whisper 프롬프트 누출
         /^(uh+|um+|ah+|hmm+)$/i, // 영어 추임새
         /^(끝|end|종료|stop)$/i, // 무의미한 종료 신호
+        /promoting.*video/i, // 영어 프로모션
       ];
 
       if (noisePatterns.some((pattern) => pattern.test(userMessage.trim()))) {
         this.logger.log(
           `⚠️ Noise pattern detected: "${userMessage}" - ignored`,
+        );
+        await this.sendFeedbackResponse(
+          sessionId,
+          '죄송합니다, 말씀을 잘 못 알아들었어요. 다시 한번 말씀해주시겠어요?',
         );
         return;
       }
@@ -326,9 +421,9 @@ export class SignalingGateway
 
       this.logger.log(`🤖 AI response: "${aiResponse}"`);
 
-      // 3. TTS
+      // 3. TTS (남성 목소리 - echo)
       const aiAudioBuffer =
-        await this.aiConversationService.textToSpeech(aiResponse);
+        await this.aiConversationService.textToSpeech(aiResponse, 'echo');
 
       this.logger.log(`AI audio: ${aiAudioBuffer.length} bytes`);
 
@@ -344,6 +439,36 @@ export class SignalingGateway
       client.emit('error', {
         message: 'Failed to process audio',
       });
+    } finally {
+      // 🔒 처리 완료 - 플래그 해제
+      this.processingAudio.set(sessionId, false);
+      this.logger.log(`🔓 Audio processing completed for session ${sessionId}`);
+    }
+  }
+
+  /**
+   * Send feedback response when noise/invalid audio detected
+   */
+  private async sendFeedbackResponse(
+    sessionId: string,
+    message: string,
+  ): Promise<void> {
+    try {
+      // TTS로 피드백 메시지 생성 (남성 목소리 - echo)
+      const feedbackAudio =
+        await this.aiConversationService.textToSpeech(message, 'echo');
+
+      // 클라이언트에 전송
+      this.server.to(sessionId).emit('ai-audio-response', {
+        audioData: feedbackAudio.toString('base64'),
+        timestamp: Date.now(),
+      });
+
+      this.logger.log(`📢 Sent feedback: "${message}"`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send feedback response: ${error.message}`,
+      );
     }
   }
 

@@ -92,9 +92,9 @@ export class ProcessAIConversationUseCase
       timestamp: new Date().toISOString(),
     });
 
-    // 9. Convert AI response to speech
+    // 9. Convert AI response to speech (남성 목소리)
     const audioBuffer =
-      await this.aiConversationService.textToSpeech(aiResponse);
+      await this.aiConversationService.textToSpeech(aiResponse, 'echo');
 
     // 10. Update call
     await this.callRepository.update(call);

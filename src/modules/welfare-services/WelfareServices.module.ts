@@ -68,6 +68,9 @@ import { WelfareServicesController } from './presentation/controllers/WelfareSer
     API_CACHE_REPOSITORY,
     AISummaryService,
     SearchWelfareServicesByKeywordUseCase, // AI에서 사용하도록 export
+    GetAllWelfareServicesUseCase, // AI에서 최신 복지 조회용
+    SearchWelfareServicesByRegionUseCase, // AI에서 지역별 검색용
+    GetWelfareServiceUseCase, // AI에서 상세 정보 조회용
   ],
 })
 export class WelfareServicesModule {}

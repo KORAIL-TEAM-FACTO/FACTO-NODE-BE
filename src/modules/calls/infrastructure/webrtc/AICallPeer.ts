@@ -111,22 +111,23 @@ export class AICallPeer {
 
   /**
    * 수신된 오디오 트랙 처리
+   *
+   * NOTE: RTP 패킷 처리는 비활성화됨
+   * - SignalingGateway의 'user-audio' 이벤트로 음성 처리
+   * - 여기서 처리하면 중복 응답 발생
    */
   private handleIncomingAudioTrack(track: any, streams: any[]): void {
-    this.logger.log(`Processing incoming audio track`);
+    this.logger.log(`Audio track received (RTP processing disabled - using WebSocket instead)`);
 
-    // RTP 패킷 수신
-    track.onReceiveRtp.subscribe((rtp: any) => {
-      // RTP payload를 버퍼로 변환
-      const audioData = Buffer.from(rtp.payload);
-      this.audioChunks.push(audioData);
-
-      // 3초마다 AI 처리
-      if (this.audioChunks.length >= 150 && !this.isProcessing) {
-        // 48kHz, 20ms 패킷 기준 (150 packets ≈ 3초)
-        this.processAudioWithAI();
-      }
-    });
+    // ❌ RTP 패킷 처리 비활성화
+    // SignalingGateway에서 'user-audio' 이벤트로 처리하므로 여기서는 처리하지 않음
+    // track.onReceiveRtp.subscribe((rtp: any) => {
+    //   const audioData = Buffer.from(rtp.payload);
+    //   this.audioChunks.push(audioData);
+    //   if (this.audioChunks.length >= 150 && !this.isProcessing) {
+    //     this.processAudioWithAI();
+    //   }
+    // });
   }
 
   /**
@@ -175,9 +176,9 @@ export class AICallPeer {
 
       this.logger.log(`AI response: "${aiResponse}"`);
 
-      // 3. TTS (Text to Speech)
+      // 3. TTS (Text to Speech) - 남성 목소리
       const aiAudioBuffer =
-        await this.aiConversationService.textToSpeech(aiResponse);
+        await this.aiConversationService.textToSpeech(aiResponse, 'echo');
 
       this.logger.log(
         `AI audio generated: ${aiAudioBuffer.length} bytes`,
@@ -247,21 +248,14 @@ export class AICallPeer {
    */
   private async sendInitialGreeting(): Promise<void> {
     try {
-      // 2초 후 인사말 전송 (연결 안정화 대기)
-      setTimeout(async () => {
-        this.logger.log('Sending initial greeting...');
-
-        const greeting = '안녕하세요! AI 상담원입니다. 무엇을 도와드릴까요?';
-
-        // TTS 생성
-        const audioBuffer =
-          await this.aiConversationService.textToSpeech(greeting);
-
-        this.logger.log(`Initial greeting audio generated: ${audioBuffer.length} bytes`);
-
-        // 클라이언트에게 전송
-        this.onAudioResponseCallback(audioBuffer);
-      }, 2000);
+      // 인사말은 SignalingGateway에서 처리하므로 여기서는 주석 처리
+      // setTimeout(async () => {
+      //   this.logger.log('Sending initial greeting...');
+      //   const greeting = '안녕하세요! AI 상담원입니다. 무엇을 도와드릴까요?';
+      //   const audioBuffer = await this.aiConversationService.textToSpeech(greeting, 'echo');
+      //   this.logger.log(`Initial greeting audio generated: ${audioBuffer.length} bytes`);
+      //   this.onAudioResponseCallback(audioBuffer);
+      // }, 2000);
     } catch (error) {
       this.logger.error(`Failed to send initial greeting: ${error.message}`);
     }
